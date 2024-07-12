@@ -5,17 +5,14 @@
 </head>
 <body>
     <h1>Registrar</h1>
-    <% if (errors) { %>
-        <div>
-            <% errors.forEach(error => { %>
-                <p><%= error.msg %></p>
-            <% }) %>
-        </div>
+    <% if (error_msg) { %>
+        <p><%= error_msg %></p>
     <% } %>
     <form action="/register" method="POST">
         <input type="text" name="username" placeholder="Usuário" required>
         <input type="password" name="password" placeholder="Senha" required>
-        <input type="text" name="setor" placeholder="Setor" required>
+        <label for="isAdmin">Administrador?</label>
+        <input type="checkbox" id="isAdmin" name="isAdmin" value="true">
         <button type="submit">Registrar</button>
     </form>
 </body>

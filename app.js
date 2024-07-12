@@ -1,154 +1,157 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
-const flash = require('connect-flash');
 const bcrypt = require('bcryptjs');
+const flash = require('express-flash');
 const { Pool } = require('pg');
-
-const app = express();
-const pool = new Pool({
-    user: 'seu_usuario',
-    host: 'localhost',
-    database: 'sistema_permissoes',
-    password: 'sua_senha',
-    port: 5432,
-});
-
 app.set('view engine', 'ejs');
 app.use(bodyParser.urlencoded({ extended: true }));
+const app = express();
+const pool = new Pool({
+    user: 'postgres',
+    host: 'localhost',
+    database: 'docpro',
+    password: 'masterkey',
+    port: 5432,
+});
+// Configuração de sessão
 app.use(session({
-    secret: 'secreto',
+    secret: 'seu_segredo_aqui',
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: true,
+    cookie: { secure: false } // Configuração do cookie, ajuste conforme necessário
 }));
+// Middleware do express-flash (deve vir depois do express-session)
 app.use(flash());
 
-// Middleware para definir mensagens flash globalmente
+// Middleware para disponibilizar mensagens flash para todas as views
 app.use((req, res, next) => {
     res.locals.success_msg = req.flash('success_msg');
     res.locals.error_msg = req.flash('error_msg');
     next();
 });
 
-// Rotas
-app.get('/', (req, res) => {
-    res.render('index');
-});
+// Middleware para verificar se o usuário está autenticado
+function ensureAuthenticated(req, res, next) {
+    if (req.session.user) {
+        // Se houver um usuário na sessão, significa que está autenticado
+        return next();
+    } else {
+        // Caso contrário, redireciona para a página de login
+        req.flash('error_msg', 'Faça login para acessar esta página');
+        res.redirect('/login');
+    }
+}
 
-// Exibir o formulário de login
+// Rota para exibir o formulário de login
 app.get('/login', (req, res) => {
     res.render('login');
 });
 
-// Exibir o formulário de registro com a lista de setores
-app.get('/register', (req, res) => {
-    pool.query('SELECT * FROM setores', (err, result) => {
-        if (err) {
-            req.flash('error_msg', 'Erro ao carregar setores');
-            res.redirect('/');
-        } else {
-            res.render('register', { setores: result.rows });
-        }
-    });
-});
-
-// Processar o formulário de registro
-app.post('/register', async (req, res) => {
-    const { username, password, setor_id } = req.body;
-    let errors = [];
-
-    if (!username || !password || !setor_id) {
-        errors.push({ msg: 'Por favor, preencha todos os campos' });
-    }
-
-    if (errors.length > 0) {
-        pool.query('SELECT * FROM setores', (err, result) => {
-            if (err) {
-                req.flash('error_msg', 'Erro ao carregar setores');
-                res.redirect('/');
-            } else {
-                res.render('register', { errors, username, password, setores: result.rows });
-            }
-        });
-    } else {
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        pool.query(
-            'INSERT INTO users (username, password, setor_id) VALUES ($1, $2, $3) RETURNING id',
-            [username, hashedPassword, setor_id],
-            (err, result) => {
-                if (err) {
-                    req.flash('error_msg', 'Erro ao registrar usuário');
-                    res.redirect('/register');
-                } else {
-                    req.flash('success_msg', 'Você está registrado e pode fazer login');
-                    res.redirect('/login');
-                }
-            }
-        );
-    }
-});
-
-// Processar o formulário de login
+// Rota para processar o formulário de login
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
     let errors = [];
 
+    // Validar se username e password foram informados
     if (!username || !password) {
         errors.push({ msg: 'Por favor, preencha todos os campos' });
-    }
-
-    if (errors.length > 0) {
         res.render('login', { errors, username, password });
-    } else {
-        pool.query(
-            'SELECT * FROM users WHERE username = $1',
-            [username],
-            async (err, result) => {
-                if (err) {
-                    req.flash('error_msg', 'Erro ao buscar usuário');
-                    res.redirect('/login');
-                } else {
-                    if (result.rows.length > 0) {
-                        const user = result.rows[0];
-
-                        const isMatch = await bcrypt.compare(password, user.password);
-                        if (isMatch) {
-                            req.session.user = user;
-                            req.flash('success_msg', 'Você está logado');
-                            res.redirect('/dashboard');
-                        } else {
-                            req.flash('error_msg', 'Senha incorreta');
-                            res.redirect('/login');
-                        }
-                    } else {
-                        req.flash('error_msg', 'Usuário não encontrado');
-                        res.redirect('/login');
-                    }
-                }
-            }
-        );
+        return;
     }
-});
 
-// Exibir o dashboard após login
-app.get('/dashboard', (req, res) => {
-    if (!req.session.user) {
-        req.flash('error_msg', 'Por favor, faça login para ver esta página');
+    try {
+        // Buscar usuário no banco de dados
+        const query = 'SELECT * FROM users WHERE username = $1';
+        const { rows } = await pool.query(query, [username]);
+
+        if (rows.length === 0) {
+            // Usuário não encontrado
+            errors.push({ msg: 'Usuário não encontrado' });
+            res.render('login', { errors, username, password });
+            return;
+        }
+
+        const user = rows[0];
+        // Comparar senha fornecida com a senha hashada no banco de dados
+        const isMatch = await bcrypt.compare(password, user.password);
+
+        if (isMatch) {
+            // Senha correta, definir usuário na sessão
+            req.session.user = user;
+            req.flash('success_msg', 'Você está logado');
+            res.redirect('/dashboard');
+        } else {
+            // Senha incorreta
+            errors.push({ msg: 'Senha incorreta' });
+            res.render('login', { errors, username, password });
+        }
+    } catch (error) {
+        console.error('Erro ao buscar usuário:', error);
+        req.flash('error_msg', 'Erro ao buscar usuário');
         res.redirect('/login');
-    } else {
-        pool.query('SELECT * FROM setores WHERE id = $1', [req.session.user.setor_id], (err, result) => {
-            if (err) {
-                req.flash('error_msg', 'Erro ao carregar setor');
-                res.redirect('/login');
-            } else {
-                res.render('dashboard', { user: req.session.user, setor: result.rows[0] });
-            }
-        });
     }
 });
 
-// Deslogar usuário
+// Rota para exibir o formulário de registro
+app.get('/register', (req, res) => {
+    res.render('register');
+});
+
+// Rota para processar o formulário de registro
+app.post('/register', async (req, res) => {
+    const { username, password, isAdmin } = req.body;
+
+    // Simples validação de campos
+    if (!username || !password) {
+        req.flash('error_msg', 'Por favor, preencha todos os campos');
+        res.redirect('/register');
+        return;
+    }
+
+    try {
+        // Verifica se o usuário já existe no banco de dados
+        const userExists = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+
+        if (userExists.rows.length > 0) {
+            req.flash('error_msg', 'Usuário já registrado');
+            res.redirect('/register');
+            return;
+        }
+
+        // Hash da senha antes de salvar no banco de dados
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Determina se o usuário é administrador
+        const isAdminValue = isAdmin === 'true'; // Converte para booleano
+
+        // Insere o novo usuário no banco de dados
+        await pool.query(
+            'INSERT INTO users (username, password, is_admin) VALUES ($1, $2, $3)',
+            [username, hashedPassword, isAdminValue]
+        );
+
+        req.flash('success_msg', 'Usuário registrado com sucesso');
+        res.redirect('/login');
+    } catch (err) {
+        console.error('Erro ao registrar usuário:', err.message);
+        req.flash('error_msg', 'Erro ao registrar usuário');
+        res.redirect('/register');
+    }
+});
+
+// Rota para exibir o dashboard após login
+app.get('/dashboard', ensureAuthenticated, (req, res) => {
+    pool.query('SELECT * FROM setores WHERE id = $1', [req.session.user.setor_id], (err, result) => {
+        if (err) {
+            req.flash('error_msg', 'Erro ao carregar setor');
+            res.redirect('/login');
+        } else {
+            res.render('dashboard', { user: req.session.user, setor: result.rows[0] });
+        }
+    });
+});
+// Rota para deslogar usuário
 app.get('/logout', (req, res) => {
     req.session.destroy((err) => {
         if (err) {
@@ -157,40 +160,6 @@ app.get('/logout', (req, res) => {
         res.clearCookie('connect.sid');
         res.redirect('/');
     });
-});
-
-// Gerenciar setores (exemplo: adicionar um novo setor)
-app.get('/setores', (req, res) => {
-    pool.query('SELECT * FROM setores', (err, result) => {
-        if (err) {
-            req.flash('error_msg', 'Erro ao carregar setores');
-            res.redirect('/');
-        } else {
-            res.render('setores', { setores: result.rows });
-        }
-    });
-});
-
-app.post('/setores', (req, res) => {
-    const { nome } = req.body;
-    if (!nome) {
-        req.flash('error_msg', 'Por favor, preencha o nome do setor');
-        res.redirect('/setores');
-    } else {
-        pool.query(
-            'INSERT INTO setores (nome) VALUES ($1) RETURNING id',
-            [nome],
-            (err, result) => {
-                if (err) {
-                    req.flash('error_msg', 'Erro ao adicionar setor');
-                    res.redirect('/setores');
-                } else {
-                    req.flash('success_msg', 'Setor adicionado com sucesso');
-                    res.redirect('/setores');
-                }
-            }
-        );
-    }
 });
 
 const PORT = process.env.PORT || 5000;
