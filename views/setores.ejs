@@ -1,0 +1,26 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gerenciar Setores</title>
+</head>
+<body>
+    <h1>Gerenciar Setores</h1>
+    <% if (success_msg) { %>
+        <div><%= success_msg %></div>
+    <% } %>
+    <% if (error_msg) { %>
+        <div><%= error_msg %></div>
+    <% } %>
+    <form action="/setores" method="POST">
+        <input type="text" name="nome" placeholder="Nome do Setor" required>
+        <button type="submit">Adicionar Setor</button>
+    </form>
+    <h2>Setores Existentes</h2>
+    <ul>
+        <% setores.forEach(setor => { %>
+            <li><%= setor.nome %></li>
+        <% }) %>
+    </ul>
+</body>
+</html>
