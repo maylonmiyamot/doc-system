@@ -5,7 +5,11 @@
 </head>
 <body>
     <h1>Bem-vindo, <%= user.username %></h1>
-    <p>Setor: <%= setor.nome %></p>
+
+    <% if (user.is_admin) { %>
+        <a href="/manage-users">Gerenciar Usuários</a>
+    <% } %>
+
     <a href="/logout">Logout</a>
 </body>
 </html>

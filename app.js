@@ -2,10 +2,8 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-const flash = require('express-flash');
 const { Pool } = require('pg');
-app.set('view engine', 'ejs');
-app.use(bodyParser.urlencoded({ extended: true }));
+
 const app = express();
 const pool = new Pool({
     user: 'postgres',
@@ -14,6 +12,8 @@ const pool = new Pool({
     password: 'masterkey',
     port: 5432,
 });
+
+const flash = require('express-flash');
 // Configuração de sessão
 app.use(session({
     secret: 'seu_segredo_aqui',
@@ -29,6 +29,22 @@ app.use((req, res, next) => {
     res.locals.success_msg = req.flash('success_msg');
     res.locals.error_msg = req.flash('error_msg');
     next();
+});
+
+// Argumento que define a chamada dos formulários em EJS 
+app.set('view engine', 'ejs'); // Sempre delcarar a os argumentos EJS depois de todas as dependencias 
+
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// Rota para a página inicial
+app.get('/', (req, res) => {
+    // Se o usuário já estiver logado, redirecionar para o dashboard
+    if (req.session.user) {
+        res.redirect('/dashboard');
+    } else {
+        // Se não estiver logado, renderizar a página inicial
+        res.render('index');
+    }
 });
 
 // Middleware para verificar se o usuário está autenticado
@@ -142,15 +158,45 @@ app.post('/register', async (req, res) => {
 
 // Rota para exibir o dashboard após login
 app.get('/dashboard', ensureAuthenticated, (req, res) => {
-    pool.query('SELECT * FROM setores WHERE id = $1', [req.session.user.setor_id], (err, result) => {
-        if (err) {
-            req.flash('error_msg', 'Erro ao carregar setor');
-            res.redirect('/login');
-        } else {
-            res.render('dashboard', { user: req.session.user, setor: result.rows[0] });
-        }
-    });
+    res.render('dashboard', { user: req.session.user });
 });
+
+// Rota para exibir a lista de usuários (acessível apenas para administradores)
+app.get('/manage-users', ensureAuthenticated, (req, res) => {
+    if (!req.session.user.is_admin) {
+        req.flash('error_msg', 'Acesso negado');
+        res.redirect('/dashboard');
+    } else {
+        pool.query('SELECT * FROM users', (err, result) => {
+            if (err) {
+                req.flash('error_msg', 'Erro ao carregar usuários');
+                res.redirect('/dashboard');
+            } else {
+                res.render('manage-users', { users: result.rows });
+            }
+        });
+    }
+});
+
+// Rota para processar a remoção de um usuário (acessível apenas para administradores)
+app.post('/remove-user/:id', ensureAuthenticated, (req, res) => {
+    if (!req.session.user.is_admin) {
+        req.flash('error_msg', 'Acesso negado');
+        res.redirect('/dashboard');
+    } else {
+        const userId = req.params.id;
+        pool.query('DELETE FROM users WHERE id = $1', [userId], (err, result) => {
+            if (err) {
+                req.flash('error_msg', 'Erro ao remover usuário');
+                res.redirect('/manage-users');
+            } else {
+                req.flash('success_msg', 'Usuário removido com sucesso');
+                res.redirect('/manage-users');
+            }
+        });
+    }
+});
+
 // Rota para deslogar usuário
 app.get('/logout', (req, res) => {
     req.session.destroy((err) => {
